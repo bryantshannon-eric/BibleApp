@@ -21,6 +21,4 @@ If you are developing a production application, we recommend using TypeScript wi
 
 This project (the source code) is licensed under the MIT License — see the `LICENSE` file.
 
-**Important:** This repository currently includes Bible text JSON files in the `public/` folder. Some translations (for example, ESV) may be copyrighted and may not be redistributed without express permission from the rights holders.
-
-Before making this repository public, please verify the licensing for each included translation. If you do not have permission to redistribute a given translation, remove it from the repo or replace it with a public-domain or properly licensed source, or fetch the text at runtime from an API with proper attribution.
+**Note:** This repository includes Bible text JSON files in the `public/` folder. You have confirmed these versions are public domain or allow the usage you plan; keep attribution in the README and ensure compliance with any source terms.
