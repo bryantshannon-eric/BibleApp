@@ -6,7 +6,7 @@ on:
 
 # Give the workflow permission to publish Pages using GITHUB_TOKEN
 permissions:
-  contents: read
+  contents: write
   pages: write
 
 jobs:
