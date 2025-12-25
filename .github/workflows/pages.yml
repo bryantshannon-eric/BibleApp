@@ -34,6 +34,26 @@ jobs:
           echo "-- git remote --"
           git remote -v || true
 
+      - name: Debug: reproduce git push error (safe, non-failing)
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "-- git version --"
+          git --version
+          echo "-- git config --"
+          git config --list || true
+          echo "-- git remote -v --"
+          git remote -v || true
+          echo "-- git ls-remote origin --"
+          git ls-remote origin || true
+
+          echo "-- Attempting verbose authenticated push to gh-pages (will not fail the job) --"
+          set -x
+          # Using the token to authenticate; keep this command idempotent and non-blocking
+          git push https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }} HEAD:gh-pages --force --verbose || true
+          set +x
+
       - name: Deploy to GitHub Pages (gh-pages branch)
         uses: peaceiris/actions-gh-pages@v3
         with:
