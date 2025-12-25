@@ -27,9 +27,22 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Debug: show build output
+        run: |
+          echo "-- dist contents --"
+          ls -la ./dist || true
+          echo "-- git remote --"
+          git remote -v || true
+
       - name: Deploy to GitHub Pages (gh-pages branch)
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
           publish_branch: gh-pages
+          # Try to be resilient: allow empty commit and create an orphan branch if needed
+          allow_empty_commit: true
+          force_orphan: true
+          commit_message: "chore(pages): deploy via actions-gh-pages"
+          user_name: "github-actions[bot]"
+          user_email: "41898282+github-actions[bot]@users.noreply.github.com"
