@@ -4,6 +4,11 @@ on:
   push:
     branches: [ main ]
 
+# Give the workflow permission to publish Pages using GITHUB_TOKEN
+permissions:
+  contents: read
+  pages: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
