@@ -19,6 +19,10 @@ export default function BibleViewer() {
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreenWindow, setFullscreenWindow] = useState(null);
 
+  //added to fix bugs loading site from github pages 12/26/25
+const BASE_URL = import.meta.env.BASE_URL || '/';
+
+
   // Font size options
   const fontSizes = {
     small: 'text-sm',
@@ -74,7 +78,7 @@ export default function BibleViewer() {
     try {
       await Promise.all(Object.entries(fileNames).map(async ([key, fileInfo]) => {
         try {
-          const response = await fetch(`/${fileInfo.file}`);
+          const response = await fetch(`${BASE_URL}${fileInfo.file}`);
           if (!response.ok) throw new Error(`Failed to fetch ${fileInfo.file}`);
           const data = await response.json();
           
@@ -247,26 +251,46 @@ export default function BibleViewer() {
   };
 
   // Text-to-speech function
-  const speakText = (text, lang = 'en') => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Stop any ongoing speech
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Set language based on version
-      if (lang === 'es') {
-        utterance.lang = 'es-ES';
-      } else if (lang === 'el') {
-        utterance.lang = 'el-GR';
-      } else {
-        utterance.lang = 'en-US';
-      }
-      
-      utterance.rate = userSettings.speechRate; // Use user's preferred rate
-      window.speechSynthesis.speak(utterance);
+const speakText = (text, lang = 'en') => {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel(); // Stop any ongoing speech
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    // Set language based on version
+    if (lang === 'es') {
+      utterance.lang = 'es-ES';
+    } else if (lang === 'el') {
+      utterance.lang = 'el-GR';
     } else {
-      alert('Text-to-speech is not supported in your browser.');
+      utterance.lang = 'en-US';
     }
-  };
+
+    utterance.rate = userSettings.speechRate; // Use user's preferred rate
+    window.speechSynthesis.speak(utterance);
+  } else {
+    alert('Text-to-speech is not supported in your browser.');
+  }
+};
+
+// ---- logging voices (outside speakText) ----
+const logAvailableVoices = () => {
+  const synth = window.speechSynthesis;
+  const voices = synth.getVoices();
+  console.log('Available voices:', voices);
+  voices.forEach((v, i) => {
+    console.log(`${i}: name="${v.name}", lang="${v.lang}", default=${v.default}`);
+  });
+};
+
+// Call once on startup (or when user opens the speech settings)
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  if (window.speechSynthesis.getVoices().length > 0) {
+    logAvailableVoices();
+  } else {
+    window.speechSynthesis.onvoiceschanged = logAvailableVoices;
+  }
+}
+
 
   const exportNotes = () => {
     try {
