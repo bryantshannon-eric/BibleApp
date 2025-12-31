@@ -13,11 +13,14 @@ export default function BibleViewer() {
     notes: {},
     fontSize: 'medium',
     backgroundColor: 'gray',
-    speechRate: 0.9
+    speechRate: 0.9,
+    voiceName: ''
   });
   const [currentNotes, setCurrentNotes] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreenWindow, setFullscreenWindow] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voices, setVoices] = useState([]);
 
   //added to fix bugs loading site from github pages 12/26/25
 const BASE_URL = import.meta.env.BASE_URL || '/';
@@ -249,26 +252,177 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
     
     return userSettings.endVerse >= maxVerses && userSettings.currentChapter >= maxChapters;
   };
-// Text-to-speech function (simple & stable)
+// Text-to-speech function (robust + speaking state + debug logs)
 const speakText = (text, lang = 'en') => {
+  console.log('[TTS] speakText called', { lang, length: text?.length });
+
+  if (!text || !text.toString().trim()) {
+    alert('No text to read.');
+    return;
+  }
+
   if (!('speechSynthesis' in window)) {
     alert('Text-to-speech is not supported in your browser.');
     return;
   }
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
+  const attemptSpeak = () => {
+    try {
+      // Ensure speech is not paused and clear any previous speech
+      if (window.speechSynthesis.paused) {
+        try { window.speechSynthesis.resume(); } catch (e) { /* ignore */ }
+      }
+      window.speechSynthesis.cancel();
+    } catch (e) {
+      // ignore
+    }
 
-  if (lang === 'es') {
-    utterance.lang = 'es-ES';
-  } else if (lang === 'el') {
-    utterance.lang = 'el-GR';
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    if (lang === 'es') {
+      utterance.lang = 'es-ES';
+    } else if (lang === 'el') {
+      utterance.lang = 'el-GR';
+    } else {
+      utterance.lang = 'en-US';
+    }
+
+    // Clamp rate to reasonable bounds and set defaults
+    utterance.rate = Math.min(Math.max(Number(userSettings.speechRate) || 1, 0.1), 10);
+    utterance.volume = 1;
+    utterance.pitch = 1;
+
+    // Try to pick a voice that matches the desired language and prefer localService voices
+    let chosenVoice = null;
+    try {
+      const availableVoices = window.speechSynthesis.getVoices() || [];
+      if (availableVoices.length > 0) {
+        if (userSettings.voiceName) {
+          chosenVoice = availableVoices.find(v => v.name === userSettings.voiceName) ||
+                        availableVoices.find(v => v.lang && v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase())) ||
+                        availableVoices[0];
+        } else {
+          chosenVoice = availableVoices.find(v => v.lang && v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase()) && v.localService) ||
+                        availableVoices.find(v => v.lang && v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase())) ||
+                        availableVoices[0];
+        }
+
+        if (chosenVoice) {
+          utterance.voice = chosenVoice;
+          console.log('[TTS] selected voice', chosenVoice.name, chosenVoice.lang, 'local:', chosenVoice.localService);
+        }
+      } else {
+        console.log('[TTS] no voices available at attemptSpeak time');
+      }
+    } catch (e) {
+      console.warn('[TTS] error checking/selecting voices', e);
+    }
+
+    let started = false;
+    let triedFallback = false;
+
+    const speakWithVoice = (voice) => {
+      if (voice) utterance.voice = voice;
+
+      utterance.onstart = () => { console.log('[TTS] onstart'); started = true; setIsSpeaking(true); };
+      utterance.onend = () => { console.log('[TTS] onend'); setIsSpeaking(false); };
+      utterance.onerror = (err) => {
+        console.error('[TTS] onerror', err);
+        setIsSpeaking(false);
+        if (err && err.error === 'interrupted' && !triedFallback) {
+          triedFallback = true;
+          console.warn('[TTS] interrupted — retrying with fallback voice');
+          try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+          setTimeout(() => {
+            try {
+              const voices = window.speechSynthesis.getVoices();
+              if (voices && voices.length > 0) {
+                const fb = voices.find(v => v.localService) || voices[0];
+                console.log('[TTS] retrying with fallback voice', fb?.name, fb?.lang);
+                const fallbackUtter = new SpeechSynthesisUtterance(text);
+                fallbackUtter.lang = utterance.lang;
+                fallbackUtter.volume = 1;
+                fallbackUtter.pitch = 1;
+                fallbackUtter.rate = utterance.rate;
+                fallbackUtter.voice = fb;
+                fallbackUtter.onstart = () => { console.log('[TTS] fallback onstart'); setIsSpeaking(true); };
+                fallbackUtter.onend = () => { console.log('[TTS] fallback onend'); setIsSpeaking(false); };
+                fallbackUtter.onerror = (e) => { console.error('[TTS] fallback onerror', e); setIsSpeaking(false); };
+                window.speechSynthesis.speak(fallbackUtter);
+              }
+            } catch (e) {
+              console.error('[TTS] fallback speak threw', e);
+            }
+          }, 300);
+        }
+      };
+
+      try {
+        console.log('[TTS] calling speak');
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.error('[TTS] speak threw', e);
+      }
+
+      // After a short timeout, if speech didn't start but engine reports speaking, cancel and retry with fallback
+      setTimeout(() => {
+        console.log('[TTS] post-speak check, speaking:', window.speechSynthesis.speaking, 'pending:', window.speechSynthesis.pending, 'started flag:', started);
+        if (!started && window.speechSynthesis.speaking && !triedFallback) {
+          triedFallback = true;
+          console.warn('[TTS] speech did not start (onstart not fired) — cancelling and retrying with fallback voice');
+          try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+          setTimeout(() => {
+            try {
+              const voices = window.speechSynthesis.getVoices();
+              if (voices && voices.length > 0) {
+                const fb = voices.find(v => v.localService) || voices[0];
+                console.log('[TTS] fallback retry voice', fb?.name, fb?.lang);
+                const fallbackUtter = new SpeechSynthesisUtterance(text);
+                fallbackUtter.lang = utterance.lang;
+                fallbackUtter.voice = fb;
+                fallbackUtter.rate = utterance.rate;
+                fallbackUtter.volume = 1;
+                fallbackUtter.pitch = 1;
+                fallbackUtter.onstart = () => { console.log('[TTS] fallback onstart'); setIsSpeaking(true); };
+                fallbackUtter.onend = () => { console.log('[TTS] fallback onend'); setIsSpeaking(false); };
+                fallbackUtter.onerror = (e) => { console.error('[TTS] fallback onerror', e); setIsSpeaking(false); };
+                window.speechSynthesis.speak(fallbackUtter);
+              }
+            } catch (e) {
+              console.error('[TTS] fallback retry threw', e);
+            }
+          }, 300);
+        }
+
+        if (!started && !window.speechSynthesis.speaking) {
+          console.warn('[TTS] no speech started and engine not speaking — nothing to do');
+        }
+      }, 700);
+    };
+
+    // Begin speaking with chosenVoice
+    speakWithVoice(chosenVoice);
+  };
+
+  const voices = window.speechSynthesis.getVoices();
+  console.log('[TTS] voices length', voices?.length || 0);
+  if (!voices || voices.length === 0) {
+    const onVoicesChanged = () => {
+      console.log('[TTS] voiceschanged event fired', window.speechSynthesis.getVoices().length);
+      window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
+      attemptSpeak();
+    };
+
+    window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
+
+    // Fallback if voiceschanged doesn't fire in a timely manner
+    setTimeout(() => {
+      console.log('[TTS] voiceschanged fallback timeout, attempting to speak');
+      if (!window.speechSynthesis.speaking) attemptSpeak();
+    }, 800);
   } else {
-    utterance.lang = 'en-US';
+    attemptSpeak();
   }
-
-  utterance.rate = userSettings.speechRate;
-  window.speechSynthesis.speak(utterance);
 };
 
   const exportNotes = () => {
@@ -288,6 +442,131 @@ const speakText = (text, lang = 'en') => {
       console.error('Error exporting notes:', error);
       alert('Failed to export notes.');
     }
+  };
+
+  // Ensure speechSynthesis is cancelled when component unmounts
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
+  // Dev-only: expose speakText to window for testing while developing
+  useEffect(() => {
+    if (import.meta.env.MODE === 'development' && typeof window !== 'undefined') {
+      window.speakText = (text, lang) => speakText(text, lang);
+      console.log('[TTS] window.speakText bound for dev');
+      return () => {
+        try { delete window.speakText; } catch (e) { /* ignore */ }
+      };
+    }
+    return undefined;
+  }, [speakText]);
+
+  // Keep voices list up to date
+  useEffect(() => {
+    const updateVoices = () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        setVoices(window.speechSynthesis.getVoices() || []);
+      }
+    };
+    updateVoices();
+    try { window.speechSynthesis.addEventListener('voiceschanged', updateVoices); } catch (e) { /* ignore */ }
+    const timer = setTimeout(updateVoices, 700);
+    return () => {
+      try { window.speechSynthesis.removeEventListener('voiceschanged', updateVoices); } catch (e) { /* ignore */ }
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const testVoice = (voiceName) => {
+    if (!('speechSynthesis' in window)) { alert('TTS not supported'); return; }
+    const vs = window.speechSynthesis.getVoices() || [];
+    const v = vs.find(x => x.name === voiceName) || vs[0];
+    if (!v) { alert('No voices available to test'); return; }
+    const u = new SpeechSynthesisUtterance('Testing voice ' + v.name);
+    u.voice = v;
+    u.onstart = () => { console.log('[TTS] test onstart', v.name); alert('Voice started: ' + v.name); };
+    u.onerror = (e) => { console.log('[TTS] test onerror', v.name, e); alert('Voice failed: ' + v.name + ' — ' + (e?.error || 'error')); };
+    window.speechSynthesis.speak(u);
+  };
+
+  const autoDetectVoice = async () => {
+    if (!('speechSynthesis' in window)) { alert('TTS not supported'); return; }
+    const vs = window.speechSynthesis.getVoices() || [];
+    if (!vs.length) { alert('No voices available'); return; }
+
+    // Prioritize Google voices (remote) then other non-local then localService voices
+    const prioritized = [
+      ...vs.filter(v => /google/i.test(v.name)),
+      ...vs.filter(v => !/google/i.test(v.name) && !v.localService),
+      ...vs.filter(v => v.localService)
+    ];
+
+    for (let i = 0; i < prioritized.length; i++) {
+      const v = prioritized[i];
+      console.log('[TTS] trying voice', i, v.name, v.lang, 'local:', v.localService);
+
+      // Reset engine and try speaking
+      try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+
+      const ok = await new Promise(res => {
+        let done = false;
+        let sawError = false;
+
+        const u = new SpeechSynthesisUtterance('Testing voice ' + v.name);
+        u.voice = v;
+
+        u.onstart = () => { if (!done) { done = true; res(true); } };
+        u.onend = () => { if (!done && !sawError) { done = true; res(true); } };
+        u.onerror = (e) => { sawError = true; if (!done) { done = true; res(false); } };
+
+        try {
+          window.speechSynthesis.speak(u);
+        } catch (e) {
+          console.error('[TTS] speak threw during auto-detect', e);
+          if (!done) { done = true; res(false); }
+        }
+
+        // If speaking flag goes true but onstart didn't fire, treat as tentative success unless an error occurs
+        const checkTimer = setTimeout(() => {
+          if (!done) {
+            const speakingNow = !!window.speechSynthesis && window.speechSynthesis.speaking;
+            if (speakingNow && !sawError) {
+              console.log('[TTS] speaking flag true without onstart; accepting as success for', v.name);
+              done = true;
+              res(true);
+            } else {
+              done = true;
+              res(false);
+            }
+          }
+        }, 1600);
+
+        // ensure timer can be cleared if resolved earlier
+        const finalize = (val) => {
+          clearTimeout(checkTimer);
+          if (!done) { done = true; res(val); }
+        };
+
+        // wrap res to clear timeout
+      });
+
+      if (ok) {
+        const newSettings = { ...userSettings, voiceName: v.name };
+        setUserSettings(newSettings);
+        persistSettings(newSettings);
+        alert('Auto-detected working voice: ' + v.name);
+        return;
+      }
+    }
+    alert('No working voice found');
   };
 
   const importNotes = (event) => {
@@ -426,6 +705,16 @@ const speakText = (text, lang = 'en') => {
           
           <div className="flex items-center space-x-2">
             <button
+              onClick={() => speakText('Hello world')}
+              disabled={isSpeaking}
+              title={isSpeaking ? 'Reading...' : 'Test speech'}
+              className="bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Test Speech
+            </button>
+            {isSpeaking && <span className="ml-2 text-sm font-medium text-gray-700">Reading...</span>}
+            <div aria-live="polite" className="sr-only">{isSpeaking ? 'Reading' : ''}</div>
+            <button
               onClick={exportNotes}
               className="bg-green-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-green-700"
             >
@@ -494,9 +783,11 @@ const speakText = (text, lang = 'en') => {
                 <div className="flex items-center gap-2">
                   {!isNotes && (
                     <button
-                      onClick={() => speakText(verseText, lang)}
-                      className="hover:bg-white hover:bg-opacity-20 p-2 rounded"
-                      title="Read aloud"
+                      onClick={() => { if (!verseText || !verseText.trim()) { alert('No text to read'); return; } speakText(verseText, lang); }}
+                      disabled={!verseText || isSpeaking}
+                      aria-label="Read aloud"
+                      title={!verseText || !verseText.trim() ? 'No text to read' : isSpeaking ? 'Reading...' : 'Read aloud'}
+                      className="hover:bg-white hover:bg-opacity-20 p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Volume2 size={18} />
                     </button>
@@ -630,6 +921,36 @@ const speakText = (text, lang = 'en') => {
                   <span className="text-sm font-medium w-12">{userSettings.speechRate.toFixed(1)}x</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">Adjust how fast verses are read aloud (0.5 = slow, 1.5 = fast)</p>
+
+                <h3 className="font-semibold mt-6 mb-3">Voice</h3>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={userSettings.voiceName}
+                    onChange={(e) => {
+                      const newSettings = { ...userSettings, voiceName: e.target.value };
+                      setUserSettings(newSettings);
+                      persistSettings(newSettings);
+                    }}
+                    className="flex-1 bg-gray-100 rounded p-2"
+                  >
+                    <option value="">Auto (best)</option>
+                    {voices.map(v => (
+                      <option key={v.name} value={v.name}>{v.name} — {v.lang}{v.localService ? ' (local)' : ''}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => testVoice(userSettings.voiceName)}
+                    className="bg-indigo-500 text-white rounded px-4 py-2 text-sm font-semibold hover:bg-indigo-600"
+                  >
+                    Test
+                  </button>
+                  <button
+                    onClick={autoDetectVoice}
+                    className="bg-gray-200 rounded px-4 py-2 text-sm font-semibold hover:bg-gray-300"
+                  >
+                    Auto-detect
+                  </button>
+                </div>
               </div>
             </div>
             
