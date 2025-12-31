@@ -250,27 +250,62 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
     return userSettings.endVerse >= maxVerses && userSettings.currentChapter >= maxChapters;
   };
 
-  // Text-to-speech function
-const speakText = (text, lang = 'en') => {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel(); // Stop any ongoing speech
-    const utterance = new SpeechSynthesisUtterance(text);
-
-    // Set language based on version
-    if (lang === 'es') {
-      utterance.lang = 'es-ES';
-    } else if (lang === 'el') {
-      utterance.lang = 'el-GR';
-    } else {
-      utterance.lang = 'en-US';
-    }
-
-    utterance.rate = userSettings.speechRate; // Use user's preferred rate
-    window.speechSynthesis.speak(utterance);
-  } else {
-    alert('Text-to-speech is not supported in your browser.');
-  }
+const PREFERRED_VOICES = {
+  en: { name: 'Daniel', lang: 'en-GB' },   // your chosen English
+  es: { name: 'Jorge',  lang: 'es-ES' },   // your chosen Spanish
+  el: { name: 'Melina', lang: 'el-GR' },   // your chosen Greek
 };
+
+const findPreferredVoice = (langKey) => {
+  if (!('speechSynthesis' in window)) return null;
+
+  const prefs = PREFERRED_VOICES[langKey];
+  if (!prefs) return null;
+
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
+
+  // 1. Exact name match
+  let voice = voices.find(v => v.name === prefs.name);
+  if (voice) return voice;
+
+  // 2. Exact lang match
+  voice = voices.find(v => v.lang === prefs.lang);
+  if (voice) return voice;
+
+  // 3. Same language prefix (e.g. en-*)
+  voice = voices.find(v => v.lang && v.lang.startsWith(prefs.lang.split('-')[0]));
+  return voice || null;
+};
+
+// Text-to-speech function
+const speakText = (text, lang = 'en') => {
+  if (!('speechSynthesis' in window)) {
+    alert('Text-to-speech is not supported in your browser.');
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+
+  // Map version lang keys to BCP-47 codes
+  if (lang === 'es') {
+    utterance.lang = 'es-ES';
+  } else if (lang === 'el') {
+    utterance.lang = 'el-GR';
+  } else {
+    utterance.lang = 'en-GB'; // matches Daniel’s language
+  }
+
+  const preferredVoice = findPreferredVoice(lang);
+  if (preferredVoice) {
+    utterance.voice = preferredVoice;
+  }
+
+  utterance.rate = userSettings.speechRate;
+  window.speechSynthesis.speak(utterance);
+};
+
 
 // ---- logging voices (outside speakText) ----
 const logAvailableVoices = () => {
