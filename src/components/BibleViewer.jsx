@@ -249,73 +249,27 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
     
     return userSettings.endVerse >= maxVerses && userSettings.currentChapter >= maxChapters;
   };
-
-// Try to find a reasonable voice, but never block speech if none found
-const getVoiceForLang = (langCode) => {
-  if (!('speechSynthesis' in window)) return null;
-
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices || voices.length === 0) return null;
-
-  // 1. Exact language match (e.g. en-GB, es-ES, el-GR)
-  let voice = voices.find(v => v.lang === langCode);
-  if (voice) return voice;
-
-  // 2. Same language family (e.g. en-*, es-*, el-*)
-  const base = langCode.split('-')[0];
-  voice = voices.find(v => v.lang && v.lang.startsWith(base));
-  return voice || null; // fall back to browser default if null
-};
-
+// Text-to-speech function (simple & stable)
 const speakText = (text, lang = 'en') => {
   if (!('speechSynthesis' in window)) {
     alert('Text-to-speech is not supported in your browser.');
     return;
   }
 
-  // Decide language code
-  let langCode = 'en-GB';
-  if (lang === 'es') langCode = 'es-ES';
-  if (lang === 'el') langCode = 'el-GR';
-
-  // Cancel any ongoing speech
   window.speechSynthesis.cancel();
-
-  // Create utterance
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = langCode;
 
-  // Optional: try to pick a voice for this language
-  const voice = getVoiceForLang(langCode);
-  if (voice) {
-    utterance.voice = voice;
+  if (lang === 'es') {
+    utterance.lang = 'es-ES';
+  } else if (lang === 'el') {
+    utterance.lang = 'el-GR';
+  } else {
+    utterance.lang = 'en-US';
   }
 
   utterance.rate = userSettings.speechRate;
   window.speechSynthesis.speak(utterance);
 };
-
-
-
-// ---- logging voices (outside speakText) ----
-const logAvailableVoices = () => {
-  const synth = window.speechSynthesis;
-  const voices = synth.getVoices();
-  console.log('Available voices:', voices);
-  voices.forEach((v, i) => {
-    console.log(`${i}: name="${v.name}", lang="${v.lang}", default=${v.default}`);
-  });
-};
-
-// Call once on startup (or when user opens the speech settings)
-if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  if (window.speechSynthesis.getVoices().length > 0) {
-    logAvailableVoices();
-  } else {
-    window.speechSynthesis.onvoiceschanged = logAvailableVoices;
-  }
-}
-
 
   const exportNotes = () => {
     try {
