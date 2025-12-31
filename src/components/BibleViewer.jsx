@@ -250,61 +250,51 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
     return userSettings.endVerse >= maxVerses && userSettings.currentChapter >= maxChapters;
   };
 
-const PREFERRED_VOICES = {
-  en: { name: 'Daniel', lang: 'en-GB' },   // your chosen English
-  es: { name: 'Jorge',  lang: 'es-ES' },   // your chosen Spanish
-  el: { name: 'Melina', lang: 'el-GR' },   // your chosen Greek
-};
-
-const findPreferredVoice = (langKey) => {
+// Try to find a reasonable voice, but never block speech if none found
+const getVoiceForLang = (langCode) => {
   if (!('speechSynthesis' in window)) return null;
-
-  const prefs = PREFERRED_VOICES[langKey];
-  if (!prefs) return null;
 
   const voices = window.speechSynthesis.getVoices();
   if (!voices || voices.length === 0) return null;
 
-  // 1. Exact name match
-  let voice = voices.find(v => v.name === prefs.name);
+  // 1. Exact language match (e.g. en-GB, es-ES, el-GR)
+  let voice = voices.find(v => v.lang === langCode);
   if (voice) return voice;
 
-  // 2. Exact lang match
-  voice = voices.find(v => v.lang === prefs.lang);
-  if (voice) return voice;
-
-  // 3. Same language prefix (e.g. en-*)
-  voice = voices.find(v => v.lang && v.lang.startsWith(prefs.lang.split('-')[0]));
-  return voice || null;
+  // 2. Same language family (e.g. en-*, es-*, el-*)
+  const base = langCode.split('-')[0];
+  voice = voices.find(v => v.lang && v.lang.startsWith(base));
+  return voice || null; // fall back to browser default if null
 };
 
-// Text-to-speech function
 const speakText = (text, lang = 'en') => {
   if (!('speechSynthesis' in window)) {
     alert('Text-to-speech is not supported in your browser.');
     return;
   }
 
+  // Decide language code
+  let langCode = 'en-GB';
+  if (lang === 'es') langCode = 'es-ES';
+  if (lang === 'el') langCode = 'el-GR';
+
+  // Cancel any ongoing speech
   window.speechSynthesis.cancel();
+
+  // Create utterance
   const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = langCode;
 
-  // Map version lang keys to BCP-47 codes
-  if (lang === 'es') {
-    utterance.lang = 'es-ES';
-  } else if (lang === 'el') {
-    utterance.lang = 'el-GR';
-  } else {
-    utterance.lang = 'en-GB'; // matches Daniel’s language
-  }
-
-  const preferredVoice = findPreferredVoice(lang);
-  if (preferredVoice) {
-    utterance.voice = preferredVoice;
+  // Optional: try to pick a voice for this language
+  const voice = getVoiceForLang(langCode);
+  if (voice) {
+    utterance.voice = voice;
   }
 
   utterance.rate = userSettings.speechRate;
   window.speechSynthesis.speak(utterance);
 };
+
 
 
 // ---- logging voices (outside speakText) ----
