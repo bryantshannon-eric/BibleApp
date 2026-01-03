@@ -2,87 +2,53 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
-# Give the workflow permission to publish Pages using GITHUB_TOKEN
 permissions:
-  contents: write
+  contents: read
   pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: 20
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
-      - name: Build
+      - name: Build site
         run: npm run build
 
       - name: Debug: show build output
-        run: |
-          echo "-- dist contents --"
-          ls -la ./dist || true
-          echo "-- git remote --"
-          git remote -v || true
+        run: ls -R
 
-      - name: Debug: reproduce git push error (safe, non-failing)
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "-- git version --"
-          git --version
-          echo "-- git config --"
-          git config --list || true
-          echo "-- git remote -v --"
-          git remote -v || true
-          echo "-- git ls-remote origin --"
-          git ls-remote origin || true
-
-          echo "-- Attempting verbose authenticated push to gh-pages (will not fail the job) --"
-          set -x
-          # Using the token to authenticate; keep this command idempotent and non-blocking
-          git push https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }} HEAD:gh-pages --force --verbose || true
-          set +x
-
-      - name: Deploy to GitHub Pages (gh-pages branch)
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Upload build artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          publish_branch: gh-pages
-          # Try to be resilient: allow empty commit and create an orphan branch if needed
-          allow_empty_commit: true
-          force_orphan: true
-          commit_message: "chore(pages): deploy via actions-gh-pages"
-          user_name: "github-actions[bot]"
-          user_email: "41898282+github-actions[bot]@users.noreply.github.com"
+          path: ./dist
 
-      - name: Ensure Pages site configuration
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Ensure Pages site uses gh-pages branch"
-          curl -sS -X PUT \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/pages \
-            -d '{"source":{"branch":"gh-pages","path":"/"}}' || true
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
-      - name: Check Pages site status
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Sleep briefly to allow site to register"
-          sleep 3
-          echo "Pages status:"
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${{ github.repository }}/pages || true
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
