@@ -7,4 +7,8 @@ export default defineConfig({
   // https://<user>.github.io/BibleApp/
   base: '/BibleApp/',
   plugins: [react()],
+  build: {
+    outDir: 'docs',
+    emptyOutDir: true
+  }
 })
