@@ -1,14 +1,21 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Loader2, ArrowLeftRight } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 
 export default function Translator() {
+  const location = useLocation();
+  const incomingText = location.state?.text || '';
+  const incomingSourceLangKey = location.state?.sourceLang || 'es'; // 'es' or 'en'
+
+  const initialDirection = incomingSourceLangKey === 'en' ? 'en-es' : 'es-en';
+  const [direction, setDirection] = useState(initialDirection);
+
   const [sourceText, setSourceText] = useState(
-    "En el principio creó Dios los cielos y la tierra."
+    incomingText || '' // no hard-coded default sentence
   );
   const [translations, setTranslations] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [direction, setDirection] = useState('es-en');
 
   const translateText = async () => {
     setLoading(true);
@@ -16,62 +23,55 @@ export default function Translator() {
     setTranslations(null);
 
     const isSpanishToEnglish = direction === 'es-en';
-    const sourceLang = isSpanishToEnglish ? 'es' : 'en';
-    const targetLang = isSpanishToEnglish ? 'en' : 'es';
+    const sourceLangCode = isSpanishToEnglish ? 'es' : 'en';
+    const targetLangCode = isSpanishToEnglish ? 'en' : 'es';
 
     try {
-      // Split text into words
       const words = sourceText.trim().split(/\s+/);
       const translatedWords = [];
 
-      // Translate each word
       for (const word of words) {
         try {
-          // Use Google Translate API (unofficial free endpoint)
-          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(word)}`;
-          
+          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLangCode}&tl=${targetLangCode}&dt=t&q=${encodeURIComponent(
+            word
+          )}`;
+
           const response = await fetch(url);
           const data = await response.json();
-          
-          // Google Translate returns: [[[translated, original, ...]]]
+
           const translation = data[0][0][0];
-          
+
           translatedWords.push({
-            word: word,
+            word,
             primary: translation,
-            alternates: [] // Google's free API doesn't provide alternates
+            alternates: []
           });
         } catch (err) {
           console.error(`Error translating "${word}":`, err);
           translatedWords.push({
-            word: word,
-            primary: word, // If translation fails, keep original
+            word,
+            primary: word,
             alternates: []
           });
         }
       }
 
       setTranslations(translatedWords);
-      
     } catch (err) {
-      setError("Failed to translate. Please try again. Error: " + err.message);
-      console.error("Translation error:", err);
+      setError(
+        'Failed to translate. Please try again. Error: ' + err.message
+      );
+      console.error('Translation error:', err);
     } finally {
       setLoading(false);
     }
   };
 
-
-
   const switchDirection = () => {
-    setDirection(prev => prev === 'es-en' ? 'en-es' : 'es-en');
+    setDirection(prev => (prev === 'es-en' ? 'en-es' : 'es-en'));
     setTranslations(null);
     setError(null);
-    if (direction === 'es-en') {
-      setSourceText("In the beginning God created the heavens and the earth.");
-    } else {
-      setSourceText("En el principio creó Dios los cielos y la tierra.");
-    }
+    // Do NOT change sourceText here
   };
 
   const isSpanishToEnglish = direction === 'es-en';
@@ -89,6 +89,7 @@ export default function Translator() {
         </p>
 
         <div className="grid md:grid-cols-2 gap-6">
+          {/* LEFT COLUMN: input */}
           <div className="bg-white rounded-lg shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold text-gray-700">
@@ -103,12 +104,29 @@ export default function Translator() {
                 Switch
               </button>
             </div>
+
             <textarea
               value={sourceText}
-              onChange={(e) => setSourceText(e.target.value)}
+              onChange={e => setSourceText(e.target.value)}
               className="w-full h-40 p-4 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none resize-none text-lg"
               placeholder={`Enter ${sourceLang} Bible verse here...`}
             />
+
+            <div className="flex justify-between items-center mt-2 text-sm text-gray-500">
+              <span>{sourceText.trim().length} characters</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSourceText('');
+                  setTranslations(null);
+                  setError(null);
+                }}
+                className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200"
+              >
+                Clear
+              </button>
+            </div>
+
             <button
               onClick={translateText}
               disabled={loading || !sourceText.trim()}
@@ -125,11 +143,12 @@ export default function Translator() {
             </button>
           </div>
 
+          {/* RIGHT COLUMN: results */}
           <div className="bg-white rounded-lg shadow-lg p-6">
             <h2 className="text-2xl font-semibold text-gray-700 mb-4">
               Word-by-Word {targetLang}
             </h2>
-            
+
             <div className="h-40 overflow-y-auto border-2 border-gray-200 rounded-lg p-4">
               {!translations && !loading && !error && (
                 <p className="text-gray-400 italic">
@@ -137,14 +156,15 @@ export default function Translator() {
                 </p>
               )}
 
-              {error && (
-                <p className="text-red-600">{error}</p>
-              )}
+              {error && <p className="text-red-600">{error}</p>}
 
               {translations && (
                 <div className="space-y-3">
                   {translations.map((item, index) => (
-                    <div key={index} className="border-b border-gray-100 pb-2">
+                    <div
+                      key={index}
+                      className="border-b border-gray-100 pb-2"
+                    >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <span className="font-semibold text-gray-700">
@@ -169,13 +189,26 @@ export default function Translator() {
             💡 How This Works
           </h3>
           <div className="space-y-2 text-gray-600">
-            <p><strong>Bidirectional Translation:</strong> Switch between Spanish→English and English→Spanish with one click</p>
-            <p><strong>Free Translation:</strong> Uses Google Translate's free API - no cost, no API key needed</p>
-            <p><strong>Word-by-Word:</strong> Each word is translated individually to help with language learning</p>
-            <p><strong>Real-time Processing:</strong> Translations are generated on-demand for any text you enter</p>
+            <p>
+              <strong>Bidirectional Translation:</strong> Switch between
+              Spanish→English and English→Spanish with one click
+            </p>
+            <p>
+              <strong>Free Translation:</strong> Uses Google Translate&apos;s free
+              API - no cost, no API key needed
+            </p>
+            <p>
+              <strong>Word-by-Word:</strong> Each word is translated individually
+              to help with language learning
+            </p>
+            <p>
+              <strong>Real-time Processing:</strong> Translations are generated
+              on-demand for any text you enter
+            </p>
           </div>
         </div>
       </div>
     </div>
   );
 }
+

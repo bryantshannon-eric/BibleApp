@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Maximize2, Volume2, ChevronRight, Settings2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export default function BibleViewer() {
   const [bibleData, setBibleData] = useState(null);
@@ -22,9 +23,13 @@ export default function BibleViewer() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voices, setVoices] = useState([]);
 
-  //added to fix bugs loading site from github pages 12/26/25
-const BASE_URL = import.meta.env.BASE_URL || '/';
+  const navigate = useNavigate();
 
+  // Track current utterance so we can cancel it cleanly
+  const currentUtteranceRef = useRef(null);
+
+  // added to fix bugs loading site from github pages 12/26/25
+  const BASE_URL = import.meta.env.BASE_URL || '/';
 
   // Font size options
   const fontSizes = {
@@ -75,16 +80,16 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
       "KJV": { file: "KJV.json", name: "King James Version" },
       "RVR": { file: "RVR.json", name: "Reina Valera 1909" }
     };
-    
+
     const result = {};
-    
+
     try {
       await Promise.all(Object.entries(fileNames).map(async ([key, fileInfo]) => {
         try {
           const response = await fetch(`${BASE_URL}${fileInfo.file}`);
           if (!response.ok) throw new Error(`Failed to fetch ${fileInfo.file}`);
           const data = await response.json();
-          
+
           let books;
           if (data.Genesis || data.Matthew || data.Exodus) {
             books = data;
@@ -93,7 +98,7 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
             const rootData = data[rootKey] || data;
             books = rootData.books || rootData;
           }
-          
+
           result[key] = {
             name: data.name || (data[Object.keys(data)[0]]?.name) || fileInfo.name,
             books,
@@ -104,7 +109,7 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
           result[key] = { name: fileInfo.name, books: {}, _loadError: error.message };
         }
       }));
-      
+
       setBibleData(result);
     } catch (error) {
       console.error('Failed to load Bible data:', error);
@@ -122,7 +127,7 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
   const getVerseCount = (versionData, book, chapter) => {
     const chapterData = versionData?.books?.[book]?.[chapter] || versionData?.books?.[book]?.[String(chapter)];
     if (!chapterData) return 0;
-    
+
     if (Array.isArray(chapterData)) {
       return chapterData.length;
     } else if (typeof chapterData === 'object') {
@@ -135,7 +140,7 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
   const getChapterCount = (versionData, book) => {
     const bookData = versionData?.books?.[book];
     if (!bookData) return 0;
-    
+
     if (Array.isArray(bookData)) {
       return bookData.length;
     } else if (typeof bookData === 'object') {
@@ -165,119 +170,117 @@ const BASE_URL = import.meta.env.BASE_URL || '/';
   };
 
   const handleNavigationChange = (field, value) => {
-    // Handle numeric inputs - ensure they're valid numbers >= 1
     if (field === 'currentVerse' || field === 'endVerse' || field === 'currentChapter') {
       const numValue = parseInt(value);
       if (isNaN(numValue) || numValue < 1) {
-        // If invalid, keep current value (don't update)
         return;
       }
       value = numValue;
     }
-    
+
     let newSettings = { ...userSettings, [field]: value };
-    
-    // Auto-adjust end verse if it's less than begin verse
+
     if (field === 'currentVerse' && value > userSettings.endVerse) {
       newSettings.endVerse = value;
     }
-    
-    // Validate end verse against chapter max
+
     if (field === 'endVerse' || field === 'currentVerse' || field === 'currentChapter' || field === 'currentBook') {
       const firstVersionKey = Object.keys(bibleData).find(k => bibleData[k]?.books);
       if (firstVersionKey) {
         const versionData = bibleData[firstVersionKey];
         const maxVerses = getVerseCount(versionData, newSettings.currentBook, newSettings.currentChapter);
-        
-        // If end verse is too high, set it to max
+
         if (newSettings.endVerse > maxVerses && maxVerses > 0) {
           newSettings.endVerse = maxVerses;
         }
-        
-        // If begin verse is too high, set both to max
+
         if (newSettings.currentVerse > maxVerses && maxVerses > 0) {
           newSettings.currentVerse = maxVerses;
           newSettings.endVerse = maxVerses;
         }
       }
     }
-    
+
     setUserSettings(newSettings);
     persistSettings(newSettings);
   };
 
-  // Next verse button handler
   const handleNextVerse = () => {
     const firstVersionKey = Object.keys(bibleData).find(k => bibleData[k]?.books);
     if (!firstVersionKey) return;
-    
+
     const versionData = bibleData[firstVersionKey];
     const maxVerses = getVerseCount(versionData, userSettings.currentBook, userSettings.currentChapter);
     const maxChapters = getChapterCount(versionData, userSettings.currentBook);
-    
+
     let newVerse = userSettings.endVerse + 1;
     let newChapter = userSettings.currentChapter;
-    
-    // If we're at the last verse of the chapter
+
     if (newVerse > maxVerses) {
-      // Move to next chapter
       if (newChapter < maxChapters) {
         newChapter += 1;
         newVerse = 1;
       } else {
-        // At last chapter, can't advance further
         return;
       }
     }
-    
+
     const newSettings = {
       ...userSettings,
       currentVerse: newVerse,
       endVerse: newVerse,
       currentChapter: newChapter
     };
-    
+
     setUserSettings(newSettings);
     persistSettings(newSettings);
   };
 
-  // Check if next verse button should be disabled
   const isNextVerseDisabled = () => {
     const firstVersionKey = Object.keys(bibleData).find(k => bibleData[k]?.books);
     if (!firstVersionKey) return true;
-    
+
     const versionData = bibleData[firstVersionKey];
     const maxVerses = getVerseCount(versionData, userSettings.currentBook, userSettings.currentChapter);
     const maxChapters = getChapterCount(versionData, userSettings.currentBook);
-    
+
     return userSettings.endVerse >= maxVerses && userSettings.currentChapter >= maxChapters;
   };
-// Text-to-speech function (robust + speaking state + debug logs)
-const speakText = (text, lang = 'en') => {
-  console.log('[TTS] speakText called', { lang, length: text?.length });
 
-  if (!text || !text.toString().trim()) {
-    alert('No text to read.');
-    return;
-  }
+  // Stop any active speech
+  const stopSpeech = () => {
+    if (!('speechSynthesis' in window)) return;
 
-  if (!('speechSynthesis' in window)) {
-    alert('Text-to-speech is not supported in your browser.');
-    return;
-  }
-
-  const attemptSpeak = () => {
     try {
-      // Ensure speech is not paused and clear any previous speech
-      if (window.speechSynthesis.paused) {
-        try { window.speechSynthesis.resume(); } catch (e) { /* ignore */ }
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel();
+        console.log('[TTS] cancelled speaking/pending');
       }
-      window.speechSynthesis.cancel();
+      currentUtteranceRef.current = null;
+      setIsSpeaking(false);
     } catch (e) {
-      // ignore
+      console.error('[TTS] cancel error', e);
+    }
+  };
+
+  // Main speak function (simple, one utterance at a time)
+  const speakText = (text, lang = 'en') => {
+    console.log('[TTS] speakText called', { lang, length: text?.length });
+
+    if (!text || !text.toString().trim()) {
+      alert('No text to read.');
+      return;
     }
 
+    if (!('speechSynthesis' in window)) {
+      alert('Text-to-speech is not supported in your browser.');
+      return;
+    }
+
+    stopSpeech();
+
     const utterance = new SpeechSynthesisUtterance(text);
+    currentUtteranceRef.current = utterance;
 
     if (lang === 'es') {
       utterance.lang = 'es-ES';
@@ -287,143 +290,82 @@ const speakText = (text, lang = 'en') => {
       utterance.lang = 'en-US';
     }
 
-    // Clamp rate to reasonable bounds and set defaults
-    utterance.rate = Math.min(Math.max(Number(userSettings.speechRate) || 1, 0.1), 10);
+    utterance.rate = Math.min(
+      Math.max(Number(userSettings.speechRate) || 1, 0.1),
+      10
+    );
     utterance.volume = 1;
     utterance.pitch = 1;
 
-    // Try to pick a voice that matches the desired language and prefer localService voices
-    let chosenVoice = null;
     try {
       const availableVoices = window.speechSynthesis.getVoices() || [];
       if (availableVoices.length > 0) {
+        let chosenVoice = null;
+
         if (userSettings.voiceName) {
-          chosenVoice = availableVoices.find(v => v.name === userSettings.voiceName) ||
-                        availableVoices.find(v => v.lang && v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase())) ||
-                        availableVoices[0];
+          chosenVoice =
+            availableVoices.find(v => v.name === userSettings.voiceName) ||
+            availableVoices.find(
+              v =>
+                v.lang &&
+                v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase())
+            ) ||
+            availableVoices[0];
         } else {
-          chosenVoice = availableVoices.find(v => v.lang && v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase()) && v.localService) ||
-                        availableVoices.find(v => v.lang && v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase())) ||
-                        availableVoices[0];
+          chosenVoice =
+            availableVoices.find(
+              v =>
+                v.lang &&
+                v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase()) &&
+                v.localService
+            ) ||
+            availableVoices.find(
+              v =>
+                v.lang &&
+                v.lang.toLowerCase().startsWith(utterance.lang.toLowerCase())
+            ) ||
+            availableVoices[0];
         }
 
         if (chosenVoice) {
           utterance.voice = chosenVoice;
-          console.log('[TTS] selected voice', chosenVoice.name, chosenVoice.lang, 'local:', chosenVoice.localService);
+          console.log(
+            '[TTS] selected voice',
+            chosenVoice.name,
+            chosenVoice.lang,
+            'local:',
+            chosenVoice.localService
+          );
         }
-      } else {
-        console.log('[TTS] no voices available at attemptSpeak time');
       }
     } catch (e) {
-      console.warn('[TTS] error checking/selecting voices', e);
+      console.warn('[TTS] error selecting voice', e);
     }
 
-    let started = false;
-    let triedFallback = false;
-
-    const speakWithVoice = (voice) => {
-      if (voice) utterance.voice = voice;
-
-      utterance.onstart = () => { console.log('[TTS] onstart'); started = true; setIsSpeaking(true); };
-      utterance.onend = () => { console.log('[TTS] onend'); setIsSpeaking(false); };
-      utterance.onerror = (err) => {
-        console.error('[TTS] onerror', err);
-        setIsSpeaking(false);
-        if (err && err.error === 'interrupted' && !triedFallback) {
-          triedFallback = true;
-          console.warn('[TTS] interrupted — retrying with fallback voice');
-          try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
-          setTimeout(() => {
-            try {
-              const voices = window.speechSynthesis.getVoices();
-              if (voices && voices.length > 0) {
-                const fb = voices.find(v => v.localService) || voices[0];
-                console.log('[TTS] retrying with fallback voice', fb?.name, fb?.lang);
-                const fallbackUtter = new SpeechSynthesisUtterance(text);
-                fallbackUtter.lang = utterance.lang;
-                fallbackUtter.volume = 1;
-                fallbackUtter.pitch = 1;
-                fallbackUtter.rate = utterance.rate;
-                fallbackUtter.voice = fb;
-                fallbackUtter.onstart = () => { console.log('[TTS] fallback onstart'); setIsSpeaking(true); };
-                fallbackUtter.onend = () => { console.log('[TTS] fallback onend'); setIsSpeaking(false); };
-                fallbackUtter.onerror = (e) => { console.error('[TTS] fallback onerror', e); setIsSpeaking(false); };
-                window.speechSynthesis.speak(fallbackUtter);
-              }
-            } catch (e) {
-              console.error('[TTS] fallback speak threw', e);
-            }
-          }, 300);
-        }
-      };
-
-      try {
-        console.log('[TTS] calling speak');
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        console.error('[TTS] speak threw', e);
-      }
-
-      // After a short timeout, if speech didn't start but engine reports speaking, cancel and retry with fallback
-      setTimeout(() => {
-        console.log('[TTS] post-speak check, speaking:', window.speechSynthesis.speaking, 'pending:', window.speechSynthesis.pending, 'started flag:', started);
-        if (!started && window.speechSynthesis.speaking && !triedFallback) {
-          triedFallback = true;
-          console.warn('[TTS] speech did not start (onstart not fired) — cancelling and retrying with fallback voice');
-          try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
-          setTimeout(() => {
-            try {
-              const voices = window.speechSynthesis.getVoices();
-              if (voices && voices.length > 0) {
-                const fb = voices.find(v => v.localService) || voices[0];
-                console.log('[TTS] fallback retry voice', fb?.name, fb?.lang);
-                const fallbackUtter = new SpeechSynthesisUtterance(text);
-                fallbackUtter.lang = utterance.lang;
-                fallbackUtter.voice = fb;
-                fallbackUtter.rate = utterance.rate;
-                fallbackUtter.volume = 1;
-                fallbackUtter.pitch = 1;
-                fallbackUtter.onstart = () => { console.log('[TTS] fallback onstart'); setIsSpeaking(true); };
-                fallbackUtter.onend = () => { console.log('[TTS] fallback onend'); setIsSpeaking(false); };
-                fallbackUtter.onerror = (e) => { console.error('[TTS] fallback onerror', e); setIsSpeaking(false); };
-                window.speechSynthesis.speak(fallbackUtter);
-              }
-            } catch (e) {
-              console.error('[TTS] fallback retry threw', e);
-            }
-          }, 300);
-        }
-
-        if (!started && !window.speechSynthesis.speaking) {
-          console.warn('[TTS] no speech started and engine not speaking — nothing to do');
-        }
-      }, 700);
+    utterance.onstart = () => {
+      console.log('[TTS] onstart');
+      setIsSpeaking(true);
+    };
+    utterance.onend = () => {
+      console.log('[TTS] onend');
+      setIsSpeaking(false);
+      currentUtteranceRef.current = null;
+    };
+    utterance.onerror = err => {
+      console.error('[TTS] onerror', err);
+      setIsSpeaking(false);
+      currentUtteranceRef.current = null;
     };
 
-    // Begin speaking with chosenVoice
-    speakWithVoice(chosenVoice);
+    try {
+      console.log('[TTS] calling speak');
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.error('[TTS] speak threw', e);
+      setIsSpeaking(false);
+      currentUtteranceRef.current = null;
+    }
   };
-
-  const voices = window.speechSynthesis.getVoices();
-  console.log('[TTS] voices length', voices?.length || 0);
-  if (!voices || voices.length === 0) {
-    const onVoicesChanged = () => {
-      console.log('[TTS] voiceschanged event fired', window.speechSynthesis.getVoices().length);
-      window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
-      attemptSpeak();
-    };
-
-    window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
-
-    // Fallback if voiceschanged doesn't fire in a timely manner
-    setTimeout(() => {
-      console.log('[TTS] voiceschanged fallback timeout, attempting to speak');
-      if (!window.speechSynthesis.speaking) attemptSpeak();
-    }, 800);
-  } else {
-    attemptSpeak();
-  }
-};
 
   const exportNotes = () => {
     try {
@@ -444,7 +386,6 @@ const speakText = (text, lang = 'en') => {
     }
   };
 
-  // Ensure speechSynthesis is cancelled when component unmounts
   useEffect(() => {
     return () => {
       if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -457,7 +398,6 @@ const speakText = (text, lang = 'en') => {
     };
   }, []);
 
-  // Dev-only: expose speakText to window for testing while developing
   useEffect(() => {
     if (import.meta.env.MODE === 'development' && typeof window !== 'undefined') {
       window.speakText = (text, lang) => speakText(text, lang);
@@ -469,7 +409,6 @@ const speakText = (text, lang = 'en') => {
     return undefined;
   }, [speakText]);
 
-  // Keep voices list up to date
   useEffect(() => {
     const updateVoices = () => {
       if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -502,7 +441,6 @@ const speakText = (text, lang = 'en') => {
     const vs = window.speechSynthesis.getVoices() || [];
     if (!vs.length) { alert('No voices available'); return; }
 
-    // Prioritize Google voices (remote) then other non-local then localService voices
     const prioritized = [
       ...vs.filter(v => /google/i.test(v.name)),
       ...vs.filter(v => !/google/i.test(v.name) && !v.localService),
@@ -513,7 +451,6 @@ const speakText = (text, lang = 'en') => {
       const v = prioritized[i];
       console.log('[TTS] trying voice', i, v.name, v.lang, 'local:', v.localService);
 
-      // Reset engine and try speaking
       try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
 
       const ok = await new Promise(res => {
@@ -534,7 +471,6 @@ const speakText = (text, lang = 'en') => {
           if (!done) { done = true; res(false); }
         }
 
-        // If speaking flag goes true but onstart didn't fire, treat as tentative success unless an error occurs
         const checkTimer = setTimeout(() => {
           if (!done) {
             const speakingNow = !!window.speechSynthesis && window.speechSynthesis.speaking;
@@ -548,14 +484,6 @@ const speakText = (text, lang = 'en') => {
             }
           }
         }, 1600);
-
-        // ensure timer can be cleared if resolved earlier
-        const finalize = (val) => {
-          clearTimeout(checkTimer);
-          if (!done) { done = true; res(val); }
-        };
-
-        // wrap res to clear timeout
       });
 
       if (ok) {
@@ -636,7 +564,7 @@ const speakText = (text, lang = 'en') => {
       <header className={`bg-white rounded-2xl shadow-lg p-6 mb-8 ${fullscreenWindow !== null ? 'hidden' : ''}`}>
         <div className="flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0">
           <h1 className="text-3xl font-bold text-gray-800">Bible Viewer</h1>
-          
+
           <div className="flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-4">
             <div className="flex flex-col items-center">
               <label className="text-sm font-semibold text-gray-700 mb-1">BOOK</label>
@@ -650,7 +578,7 @@ const speakText = (text, lang = 'en') => {
                 ))}
               </select>
             </div>
-            
+
             <div className="flex flex-col items-center">
               <label className="text-sm font-semibold text-gray-700 mb-1">CHAPTER</label>
               <input
@@ -661,7 +589,7 @@ const speakText = (text, lang = 'en') => {
                 className="w-24 bg-gray-100 rounded-lg p-2.5 text-center h-[42px]"
               />
             </div>
-            
+
             <div className="flex flex-col items-center">
               <label className="text-sm font-semibold text-gray-700 mb-1">START VERSE</label>
               <input
@@ -672,7 +600,7 @@ const speakText = (text, lang = 'en') => {
                 className="w-24 bg-gray-100 rounded-lg p-2.5 text-center h-[42px]"
               />
             </div>
-            
+
             <div className="flex flex-col items-center">
               <label className="text-sm font-semibold text-gray-700 mb-1">END VERSE</label>
               <input
@@ -683,7 +611,7 @@ const speakText = (text, lang = 'en') => {
                 className="w-24 bg-gray-100 rounded-lg p-2.5 text-center h-[42px]"
               />
             </div>
-            
+
             <button
               onClick={handleNextVerse}
               disabled={isNextVerseDisabled()}
@@ -693,7 +621,7 @@ const speakText = (text, lang = 'en') => {
               <ChevronRight size={20} />
               Next
             </button>
-            
+
             <button
               onClick={() => setShowSettings(true)}
               className="bg-blue-500 text-white rounded-lg px-6 py-2.5 font-semibold hover:bg-blue-600 mt-6 flex items-center gap-2"
@@ -702,18 +630,15 @@ const speakText = (text, lang = 'en') => {
               Settings
             </button>
           </div>
-          
+
           <div className="flex items-center space-x-2">
             <button
               onClick={() => speakText('Hello world')}
-              disabled={isSpeaking}
-              title={isSpeaking ? 'Reading...' : 'Test speech'}
-              className="bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-indigo-600"
+              title="Test speech"
             >
               Test Speech
             </button>
-            {isSpeaking && <span className="ml-2 text-sm font-medium text-gray-700">Reading...</span>}
-            <div aria-live="polite" className="sr-only">{isSpeaking ? 'Reading' : ''}</div>
             <button
               onClick={exportNotes}
               className="bg-green-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-green-700"
@@ -748,13 +673,11 @@ const speakText = (text, lang = 'en') => {
 
           const isNotes = i === 3 || versionKey === 'Notes';
           const versionData = bibleData[versionKey];
-          
-          // Determine language for text-to-speech
+
           let lang = 'en';
           if (versionKey === 'RVR') lang = 'es';
           if (versionKey === 'GNT') lang = 'el';
 
-          // Build verse text
           let verseText = '';
           if (!isNotes) {
             for (let v = userSettings.currentVerse; v <= userSettings.endVerse; v++) {
@@ -764,14 +687,18 @@ const speakText = (text, lang = 'en') => {
               }
             }
           }
-
           return (
-            <div
-              key={i}
-              className={`verse-window bg-white rounded-xl shadow-lg overflow-hidden flex flex-col ${
-                visibleWindows === 3 && i === 2 ? 'md:col-span-2' : ''
-              }`}
-            >
+          <div
+          key={i}
+          className={`verse-window bg-white rounded-xl shadow-lg overflow-hidden flex flex-col ${
+          isNotes
+          ? 'col-span-1 md:col-span-2'  // Notes spans full width on md+
+          : visibleWindows === 3 && i === 2
+          ? 'md:col-span-2'
+          : ''
+    }`}
+  >
+
               <div className={`p-4 ${isNotes ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'} font-semibold flex justify-between items-center`}>
                 <div>
                   {isNotes ? (
@@ -782,16 +709,69 @@ const speakText = (text, lang = 'en') => {
                 </div>
                 <div className="flex items-center gap-2">
                   {!isNotes && (
-                    <button
-                      onClick={() => { if (!verseText || !verseText.trim()) { alert('No text to read'); return; } speakText(verseText, lang); }}
-                      disabled={!verseText || isSpeaking}
-                      aria-label="Read aloud"
-                      title={!verseText || !verseText.trim() ? 'No text to read' : isSpeaking ? 'Reading...' : 'Read aloud'}
-                      className="hover:bg-white hover:bg-opacity-20 p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Volume2 size={18} />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => {
+                          if (!verseText || !verseText.trim()) {
+                            alert('No text to read');
+                            return;
+                          }
+
+                          const synth = window.speechSynthesis;
+
+                          if (synth && (synth.speaking || synth.pending)) {
+                            stopSpeech();
+                          } else {
+                            speakText(verseText, lang);
+                          }
+                        }}
+                        disabled={!verseText}
+                        aria-label={
+                          window.speechSynthesis?.speaking || window.speechSynthesis?.pending
+                            ? 'Stop reading'
+                            : 'Read aloud'
+                        }
+                        title={
+                          !verseText || !verseText.trim()
+                            ? 'No text to read'
+                            : window.speechSynthesis?.speaking || window.speechSynthesis?.pending
+                              ? 'Stop reading'
+                              : 'Read aloud'
+                        }
+                        className="hover:bg-white hover:bg-opacity-20 p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {window.speechSynthesis?.speaking || window.speechSynthesis?.pending ? (
+                          <span className="flex gap-0.5">
+                            <span className="w-1.5 h-4 bg-blue-800 rounded-sm" />
+                            <span className="w-1.5 h-4 bg-blue-800 rounded-sm" />
+                          </span>
+                        ) : (
+                          <Volume2 size={18} />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!verseText || !verseText.trim()) {
+                            alert('No text to translate');
+                            return;
+                          }
+                          navigate('/translator', {
+                            state: {
+                              text: verseText,
+                              sourceLang: lang,
+                            },
+                          });
+                        }}
+                        className="text-xs bg-white bg-opacity-20 hover:bg-opacity-40 px-2 py-1 rounded font-medium"
+                        title="Send this passage to the translation page"
+                      >
+                        Translate
+                      </button>
+                    </>
                   )}
+
                   <button
                     onClick={() => toggleFullscreen(i)}
                     className="hover:bg-white hover:bg-opacity-20 p-2 rounded"
@@ -801,7 +781,7 @@ const speakText = (text, lang = 'en') => {
                   </button>
                 </div>
               </div>
-              
+
               <div className={`flex-1 overflow-y-auto p-6 ${fontSizes[userSettings.fontSize]}`}>
                 {isNotes ? (
                   <textarea
@@ -834,7 +814,7 @@ const speakText = (text, lang = 'en') => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-2xl font-bold mb-6">Settings</h2>
-            
+
             <div className="space-y-6">
               <div>
                 <h3 className="font-semibold mb-3">Window Versions</h3>
@@ -953,7 +933,7 @@ const speakText = (text, lang = 'en') => {
                 </div>
               </div>
             </div>
-            
+
             <div className="flex justify-end space-x-4 mt-6">
               <button
                 onClick={() => setShowSettings(false)}
